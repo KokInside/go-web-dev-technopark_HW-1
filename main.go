@@ -2,41 +2,54 @@ package main
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 )
 
 var u *you
 
 const (
-	table   = "стол"
-	chair   = "стул"
-	onTable = "на столе"
-	onChair = "на стуле"
+	Table   = "стол"
+	Chair   = "стул"
+	OnTable = "на столе"
+	OnChair = "на стуле"
 )
 
 const (
-	room    = "комната"
-	kitchen = "кухня"
-	street  = "улица"
-	hallway = "коридор"
+	Room    = "комната"
+	Kitchen = "кухня"
+	Street  = "улица"
+	Hallway = "коридор"
 )
 
 const (
-	tea      = "чай"
-	backpack = "рюкзак"
-	keys     = "ключи"
-	paper    = "конспекты"
+	Tea      = "чай"
+	Backpack = "рюкзак"
+	Keys     = "ключи"
+	Paper    = "конспекты"
 )
 
 const (
-	door = "дверь"
+	Door = "дверь"
 )
 
 const (
-	putOn = "надеть"
-	take  = "взять"
+	PutOn = "надеть"
+	Take  = "взять"
 )
+
+type exit struct {
+	label string // как выход назван в тексте: "улица", "домой"
+	to    *location
+	lock  *active // nil — проход свободен
+}
+
+type location struct {
+	name    string
+	exits   []exit
+	items   []*item
+	welcome func() string // текст при входе
+	look    func() string // текст на «осмотреться»
+}
 
 type position struct {
 	name   string
@@ -44,508 +57,166 @@ type position struct {
 }
 
 type active struct {
-	name     string
-	trigger  string
-	message  string
-	isActive bool
+	name      string
+	trigger   string
+	closedMsg string
+	message   string
+	opened    bool
 }
 
 type item struct {
 	name     string
 	position position
 	pick     string
-	actOn    []*active
 }
 
 type you struct {
 	where     *location
 	inventory []*item
-}
-
-type location struct {
-	name     string
-	to       []*location
-	items    []*item
-	actions  []*active
-	obstacle []*active
-}
-
-// получить полную строку с позицией вещей
-//
-// example:
-// "на столе: ключи, конспекты, на стуле: рюкзак"
-func (l *location) getFullItemsPosition() string {
-	allItems := l.getPositionddItems()
-
-	if len(allItems) == 0 {
-		return ""
-	}
-
-	itemsByPosition := make([]string, 0, len(allItems))
-
-	for _, items := range allItems {
-		// "на столе"
-		onWhat := items[0].position.onWhat
-
-		// [ключи конспекты рюкзак]
-		itemsStrings := make([]string, 0, len(items))
-		for _, item := range items {
-			itemsStrings = append(itemsStrings, item.name)
-		}
-
-		itemsByPosition = append(itemsByPosition, fmt.Sprintf("%s: %s", onWhat, strings.Join(itemsStrings, ", ")))
-	}
-
-	return strings.Join(itemsByPosition, ", ")
-}
-
-// возвращает предметы в помещении
-// в каждом элементе - предметы на одном месте
-//
-// example:
-// [<все предметы на столе>],
-// [<все предметы на стуле>],
-// [<все предметы где-то ещё>]
-func (l *location) getPositionddItems() [][]*item {
-	m := make(map[position][]*item, len(l.items))
-
-	res := make([][]*item, 0)
-
-	for _, item := range l.items {
-		m[item.position] = append(m[item.position], item)
-	}
-
-	for _, item := range l.items {
-		items, ok := m[item.position]
-		if ok {
-			res = append(res, items)
-			delete(m, item.position)
-		}
-	}
-
-	return res
-}
-
-// " можно пройти - ..."
-func (l *location) getFullWaysToGo() string {
-	return fmt.Sprintf(" можно пройти - %s",
-		strings.Join(l.canGo(), ", "))
-}
-
-func (l *location) canGo() []string {
-	res := make([]string, 0, len(l.to))
-	for _, to := range l.to {
-		res = append(res, to.name)
-	}
-
-	return res
-}
-
-func (l *location) look(inventory []*item) string {
-	switch l.name {
-	case kitchen:
-		base := "ты находишься на кухне, %s%s.%s"
-
-		itemsPosition := l.getFullItemsPosition()
-		if itemsPosition == "" {
-			itemsPosition = "на кухне пусто"
-		}
-
-		// ", надо собрать рюкзак и идти в универ."
-
-		aims := make([]string, 0)
-		if inventory == nil {
-			aims = append(aims, "собрать рюкзак")
-		}
-		aims = append(aims, "идти в универ")
-
-		var aimString string
-		if len(aims) != 0 {
-			aimString = fmt.Sprintf(", надо %s", strings.Join(aims, " и "))
-		}
-
-		return fmt.Sprintf(base,
-			itemsPosition,
-			aimString,
-			l.getFullWaysToGo(),
-		)
-	case street:
-		return "на улице весна. можно пройти - домой"
-	case room:
-		base := "%s.%s"
-
-		itemsPosition := l.getFullItemsPosition()
-		if itemsPosition == "" {
-			itemsPosition = "пустая комната"
-		}
-
-		return fmt.Sprintf(base,
-			itemsPosition,
-			l.getFullWaysToGo(),
-		)
-
-	case hallway:
-	}
-
-	return ""
-}
-
-func (l *location) canGoTo(to string) bool {
-	ways := l.canGo()
-
-	return slices.Contains(ways, to)
-}
-
-func (l *location) goTo(to string) string {
-	if !l.canGoTo(to) {
-		return ""
-	}
-
-	destination := l.getTo(to)
-
-	l = destination
-
-	switch to {
-	case hallway:
-		base := "ничего интересного.%s"
-
-		return fmt.Sprintf(base, l.getFullWaysToGo())
-
-	case room:
-		base := "ты в своей комнате.%s"
-
-		return fmt.Sprintf(base, l.getFullWaysToGo())
-
-	case street:
-		return "на улице весна. можно пройти - домой"
-
-	case kitchen:
-		base := "кухня, ничего интересного.%s"
-
-		return fmt.Sprintf(base, l.getFullWaysToGo())
-	}
-
-	_ = to
-	return ""
-}
-
-func (l *location) getTo(to string) *location {
-	if !l.canGoTo(to) {
-		return nil
-	}
-
-	for _, way := range l.to {
-		if way.name == to {
-			return way
-		}
-	}
-
-	return nil
-}
-
-func (l *location) takeItem(thing string) (string, *item) {
-	if !l.canTakeItem(thing) {
-		return "", nil
-	}
-
-	var pos int
-	for i, item := range l.items {
-		if item.name == thing {
-			pos = i
-		}
-	}
-
-	i := l.items[pos]
-
-	l.items = append(l.items[:pos], l.items[pos+1:]...)
-
-	return fmt.Sprintf("предмет добавлен в инвентарь: %s", thing), i
-
-}
-
-func (l *location) punOnItem(thing string) string {
-
-	if !l.canPutOnItem(thing) {
-		return ""
-	}
-
-	var pos int
-	for i, item := range l.items {
-		if item.name == thing {
-			pos = i
-		}
-	}
-
-	l.items = append(l.items[:pos], l.items[pos+1:]...)
-
-	return fmt.Sprintf("вы надели: %s", thing)
-}
-
-func (l *location) canTake() []string {
-	res := make([]string, 0, len(l.items))
-
-	for _, item := range l.items {
-		res = append(res, item.name)
-	}
-
-	return res
-}
-
-func (l *location) hasObstacles() bool {
-	for _, i := range l.obstacle {
-		if i.isActive == false {
-			return true
-		}
-	}
-
-	return false
-}
-
-func (l *location) canTakeItem(thing string) bool {
-	items := l.canTake()
-
-	return slices.Contains(items, thing)
-}
-
-func (l *location) canPutOn() []string {
-	res := make([]string, 0, len(l.items))
-
-	for _, item := range l.items {
-		if item.pick == "надеть" {
-			res = append(res, item.name)
-		}
-	}
-
-	return res
-}
-
-func (l *location) canPutOnItem(thing string) bool {
-	items := l.canPutOn()
-
-	for _, item := range items {
-		if item == thing {
-			return true
-		}
-	}
-
-	return false
-}
-
-func (u *you) look() string {
-	return u.where.look(u.inventory)
-}
-
-func (u *you) goTo(to string) string {
-	res := u.where.goTo(to)
-	if res == "" {
-		return fmt.Sprintf("нет пути в %s", to)
-	}
-
-	destination := u.where.getTo(to)
-
-	if destination.hasObstacles() {
-		return "дверь закрыта"
-	}
-
-	if destination != nil {
-		u.where = destination
-	}
-
-	return res
-}
-
-func (u *you) take(thing string) string {
-	if u.inventory == nil {
-		return "некуда класть"
-	}
-
-	if !u.where.canTakeItem(thing) {
-		return "нет такого"
-	}
-
-	res, item := u.where.takeItem(thing)
-	if res == "" {
-		return "некуда класть"
-	}
-
-	u.inventory = append(u.inventory, item)
-
-	return res
-}
-
-func (u *you) putOn(thing string) string {
-	if !u.where.canTakeItem(thing) {
-		return "нет такого"
-	}
-
-	res := u.where.punOnItem(thing)
-	if res == "" {
-		return "нет такого"
-	}
-
-	switch thing {
-	case backpack:
-		u.inventory = make([]*item, 0)
-	}
-
-	return res
-}
-
-func (u *you) contains(thing string) bool {
-	for _, i := range u.inventory {
-		if i.name == thing {
-			return true
-		}
-	}
-
-	return false
-}
-
-func (l *location) canAct() []*active {
-	return l.actions
-}
-
-func (l *location) canActOn(actOn string) bool {
-	actions := l.canAct()
-
-	for _, active := range actions {
-		if active.name == actOn {
-			return true
-		}
-	}
-
-	return false
-}
-
-// func (l *location) act(thing, on string) string {
-// 	return ""
-// }
-
-// применить <что> над <чем>
-func (u *you) act(thing, on string) string {
-	if !u.contains(thing) {
-		return fmt.Sprintf("нет предмета в инвентаре - %s", thing)
-	}
-
-	// if !u.where.canActOn(on) {
-	// 	return "не к чему применить"
-	// }
-
-	// u.where.act()
-
-	switch on {
-	case "дверь":
-		var action *active
-
-		for _, i := range u.where.actions {
-			if i.name == on {
-				action = i
-				if action.trigger == thing {
-					action.isActive = true
-				} else {
-					return "не к чему применить"
-				}
-			}
-		}
-
-		if action == nil {
-			return "не к чему применить"
-		}
-
-		return "дверь открыта"
-	default:
-		return "не к чему применить"
-	}
+	hasBag    bool
 }
 
 func main() {
-
 	/*
 		в этой функции можно ничего не писать,
 		но тогда у вас не будет работать через go run main.go
 		очень круто будет сделать построчный ввод команд тут, хотя это и не требуется по заданию
 	*/
 
-	//initGame()
+	// initGame()
 
-	//_ = handleCommand("some command")
+	// _ = handleCommand("some command")
 }
 
 func initGame() {
 	keys := &item{
-		name: "ключи",
+		name: Keys,
 		position: position{
-			name:   table,
-			onWhat: onTable,
+			name:   Table,
+			onWhat: OnTable,
 		},
-		pick: "взять",
+		pick: Take,
 	}
 	paper := &item{
-		name: "конспекты",
+		name: Paper,
 		position: position{
-			name:   table,
-			onWhat: onTable,
+			name:   Table,
+			onWhat: OnTable,
 		},
-		pick: "взять",
+		pick: Take,
 	}
 	pack := &item{
-		name: "рюкзак",
+		name: Backpack,
 		position: position{
-			name:   chair,
-			onWhat: onChair,
+			name:   Chair,
+			onWhat: OnChair,
 		},
-		pick: "надеть",
+		pick: PutOn,
 	}
 	tea := &item{
-		name: "чай",
+		name: Tea,
 		position: position{
-			name:   table,
-			onWhat: onTable,
+			name:   Table,
+			onWhat: OnTable,
 		},
 	}
 
 	door := &active{
-		name:     door,
-		trigger:  "ключи",
-		isActive: false,
+		name:      Door,
+		trigger:   Keys,
+		opened:    false,
+		closedMsg: "дверь закрыта",
+		message:   "дверь открыта",
 	}
 
+	// locations
 	kitchen := &location{
-		name:  "кухня",
+		name:  Kitchen,
 		items: []*item{tea},
 	}
 	street := &location{
-		name:     "улица",
-		obstacle: []*active{door},
-		// actions:  []*active{door},
-		// obstacle: []*active{door},
+		name: Street,
 	}
 	room := &location{
-		name:  "комната",
+		name:  Room,
 		items: []*item{keys, paper, pack},
 	}
 	hallway := &location{
-		name:    "коридор",
-		actions: []*active{door},
+		name: Hallway,
 	}
 
-	kitchen.to = append(kitchen.to, hallway)
+	// путь с кухни
+	kitchen.exits = []exit{
+		{label: Hallway, to: hallway},
+	}
 
-	room.to = append(room.to, hallway)
+	// путь с улицы
+	street.exits = []exit{
+		{label: "домой", to: hallway},
+	}
 
-	street.to = append(street.to, hallway)
+	// путь из комнаты
+	room.exits = []exit{
+		{label: Hallway, to: hallway},
+	}
 
-	hallway.to = append(hallway.to, kitchen, room, street)
+	// путь из коридора
+	hallway.exits = []exit{
+		{label: kitchen.name, to: kitchen},
+		{label: room.name, to: room},
+		{label: street.name, to: street, lock: door},
+	}
+
+	// коридор
+	hallway.welcome = func() string {
+		return "ничего интересного." + hallway.ways()
+	}
+	hallway.look = hallway.welcome
+
+	// кухня
+	kitchen.welcome = func() string {
+		return "кухня, ничего интересного." + kitchen.ways()
+	}
+
+	kitchen.look = func() string {
+		aim := "надо идти в универ"
+		if !u.hasBag {
+			aim = "надо собрать рюкзак и идти в универ"
+		}
+		return fmt.Sprintf("ты находишься на кухне, %s, %s.%s", kitchen.itemsText(), aim, kitchen.ways())
+	}
+
+	// комната
+	room.welcome = func() string {
+		return "ты в своей комнате." + room.ways()
+	}
+
+	room.look = func() string {
+		items := room.itemsText()
+		if items == "" {
+			items = "пустая комната"
+		}
+		return fmt.Sprintf("%s.%s", items, room.ways())
+	}
+
+	// улица
+	street.welcome = func() string {
+		return "на улице весна." + street.ways()
+	}
+	street.look = street.welcome
 
 	u = &you{
 		where:     kitchen,
 		inventory: nil,
 	}
-
 }
 
 func handleCommand(command string) string {
 	commands := strings.Fields(command)
+
+	if len(commands) < 1 {
+		return ""
+	}
 
 	switch commands[0] {
 	case "осмотреться":

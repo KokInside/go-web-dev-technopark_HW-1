@@ -1,3 +1,3 @@
-module game
+module hw1
 
 go 1.26.5
